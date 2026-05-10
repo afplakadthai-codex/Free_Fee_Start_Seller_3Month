@@ -120,18 +120,9 @@ if (!function_exists('bv_seller_fee_promo_get_seller')) {
             return null;
         }
 
-        $seller = bv_seller_fee_promo_query_one(
-            'SELECT id, seller_fee_promo_starts_at, seller_fee_free_until, seller_fee_percent_override, seller_fee_promo_note, seller_fee_override_note FROM users WHERE id = ? LIMIT 1',
-            [$sellerId]
-        );
-
-        if (is_array($seller)) {
-            return $seller;
-        }
-		
-
+ 
         return bv_seller_fee_promo_query_one(
-            'SELECT id, seller_fee_free_until, seller_fee_promo_note FROM users WHERE id = ? LIMIT 1',
+             'SELECT id, seller_fee_promo_starts_at, seller_fee_free_until, seller_fee_percent_override, seller_fee_promo_note, seller_fee_override_note FROM users WHERE id = ? LIMIT 1',
             [$sellerId]
         );
     }
@@ -167,6 +158,10 @@ if (!function_exists('bv_seller_fee_promo_parse_percent')) {
 if (!function_exists('bv_seller_fee_promo_settings_from_row')) {
     function bv_seller_fee_promo_settings_from_row(?array $seller, int $sellerId, ?string $now = null): array
     {
+		        if (!is_array($seller)) {
+            $seller = [];
+        }
+
         $startsAt = bv_seller_fee_promo_empty_to_null($seller['seller_fee_promo_starts_at'] ?? null);
         $freeUntil = bv_seller_fee_promo_empty_to_null($seller['seller_fee_free_until'] ?? null);
         $percentOverride = bv_seller_fee_promo_parse_percent($seller['seller_fee_percent_override'] ?? null);
@@ -176,16 +171,15 @@ if (!function_exists('bv_seller_fee_promo_settings_from_row')) {
 
         $startsOk = $startsAt === null || ($currentTime !== false && $startsAtTime !== false && $currentTime >= $startsAtTime);
         $freeUntilOk = $freeUntil !== null && $currentTime !== false && $freeUntilTime !== false && $currentTime <= $freeUntilTime;
-        $overrideWindowOk = $startsOk && ($freeUntil === null || $freeUntilOk);
         $isActiveWindow = $startsOk && $freeUntilOk;
         $hasPercentOverride = $percentOverride !== null;
         $effectivePercent = null;
         $effectiveMode = 'default';
 
-        if ($hasPercentOverride && $overrideWindowOk) {
+        if ($hasPercentOverride) {
             $effectivePercent = $percentOverride;
             $effectiveMode = $percentOverride <= 0.0 ? 'free' : 'custom';
-        } elseif (!$hasPercentOverride && $isActiveWindow) {
+       } elseif ($isActiveWindow) { 
             $effectivePercent = 0.0;
             $effectiveMode = 'free';
         }
@@ -209,9 +203,9 @@ if (!function_exists('bv_seller_fee_promo_get_settings')) {
     /**
      * Return effective admin-controlled seller fee settings.
      */
-    function bv_seller_fee_promo_get_settings(int $sellerId): array
+     function bv_seller_fee_promo_get_settings(int $sellerId, ?string $now = null): array
     {
-        return bv_seller_fee_promo_settings_from_row(bv_seller_fee_promo_get_seller($sellerId), $sellerId);
+         return bv_seller_fee_promo_settings_from_row(bv_seller_fee_promo_get_seller($sellerId), $sellerId, $now); 
     }
 }
 
@@ -257,9 +251,11 @@ if (!function_exists('bv_seller_fee_promo_apply_fee_amount')) {
     /**
      * Calculate a future seller-balance platform fee with current admin overrides.
      */
-    function bv_seller_fee_promo_apply_fee_amount(float $grossAmount, float $defaultPercent, int $sellerId): array
+    function bv_seller_fee_promo_apply_fee_amount(float $grossAmount, float $defaultPercent, int $sellerId, ?string $now = null): array
     {
-        $settings = bv_seller_fee_promo_get_settings($sellerId);
+         $grossAmount = max(0.0, $grossAmount);
+        $defaultPercent = max(0.0, $defaultPercent);
+        $settings = bv_seller_fee_promo_get_settings($sellerId, $now);
         $mode = (string)($settings['effective_mode'] ?? 'default');
         $percentUsed = $mode === 'default' ? $defaultPercent : (float)($settings['effective_percent'] ?? 0.0);
         $percentUsed = max(0.0, $percentUsed);
@@ -322,24 +318,23 @@ if (!function_exists('bv_seller_fee_promo_number')) {
 if (!function_exists('bv_seller_fee_promo_recalculate_seller_net')) {
     function bv_seller_fee_promo_recalculate_seller_net(array $snapshot, float $removedPlatformFee): array
     {
-        if (array_key_exists('seller_net_amount_snapshot', $snapshot)) {
-            $snapshot['seller_net_amount_snapshot'] = round(
-                bv_seller_fee_promo_number($snapshot['seller_net_amount_snapshot']) + $removedPlatformFee,
-                2
-            );
-            return $snapshot;
-        }
-
-        foreach (['gross_paid_amount', 'gross_amount_snapshot', 'order_item_total', 'item_total', 'subtotal', 'gross_total'] as $grossKey) { 
+        foreach (['gross_paid_amount', 'gross_amount_snapshot', 'order_item_total', 'item_total', 'subtotal', 'gross_total'] as $grossKey) {
             if (array_key_exists($grossKey, $snapshot)) {
                 $snapshot['seller_net_amount_snapshot'] = round(
                     bv_seller_fee_promo_number($snapshot[$grossKey])
-                     - bv_seller_fee_promo_number($snapshot['payment_gateway_fee_total'] ?? 0.0)
+                    - bv_seller_fee_promo_number($snapshot['payment_gateway_fee_total'] ?? 0.0) 
                     - bv_seller_fee_promo_number($snapshot['platform_fee_total'] ?? 0.0),
                     2
                 );
                 return $snapshot;
             }
+        }
+		
+		        if (array_key_exists('seller_net_amount_snapshot', $snapshot)) {
+            $snapshot['seller_net_amount_snapshot'] = round(
+                bv_seller_fee_promo_number($snapshot['seller_net_amount_snapshot']) + $removedPlatformFee,
+                2
+            );
         }
 
         return $snapshot;
