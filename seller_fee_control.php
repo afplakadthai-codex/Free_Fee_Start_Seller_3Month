@@ -61,13 +61,13 @@ if (!function_exists('bv_admin_fee_is_admin')) {
                 }
             }
         }
-		
+
         $flags = [
             $_SESSION['is_admin'] ?? null,
             $_SESSION['admin_logged_in'] ?? null,
             $_SESSION['admin']['is_admin'] ?? null,
             $_SESSION['user']['is_admin'] ?? null,
-            $_SESSION['auth_user']['is_admin'] ?? null,			
+            $_SESSION['auth_user']['is_admin'] ?? null,
         ];
         foreach ($flags as $flag) {
             if (bv_admin_fee_is_truthy_flag($flag)) {
@@ -78,12 +78,12 @@ if (!function_exists('bv_admin_fee_is_admin')) {
         $roles = [
             $_SESSION['role'] ?? null,
             $_SESSION['user_role'] ?? null,
-           $_SESSION['admin_role'] ?? null,
-            $_SESSION['account_role'] ?? null,			
+            $_SESSION['admin_role'] ?? null,
+            $_SESSION['account_role'] ?? null,
             $_SESSION['admin']['role'] ?? null,
             $_SESSION['user']['role'] ?? null,
             $_SESSION['auth_user']['role'] ?? null,
-            $_SESSION['member']['role'] ?? null,			
+            $_SESSION['member']['role'] ?? null,
         ];
         foreach ($roles as $role) {
             if (bv_admin_fee_role_is_admin($role)) {
@@ -156,7 +156,7 @@ if (!function_exists('bv_admin_fee_debug_role_candidates')) {
 
 if (!bv_admin_fee_is_admin()) {
     http_response_code(403);
-   if (($_GET['debug_auth'] ?? '') === '1') {
+    if (($_GET['debug_auth'] ?? '') === '1') {
         header('Content-Type: text/plain; charset=UTF-8');
         echo "Forbidden\n\n";
         echo "Session keys:\n";
@@ -168,7 +168,7 @@ if (!bv_admin_fee_is_admin()) {
             echo '- ' . $key . ': raw=' . var_export($role['raw'], true) . ', normalized=' . var_export($role['normalized'], true) . "\n";
         }
         exit;
-    }	
+    }
     echo 'Forbidden';
     exit;
 }
@@ -179,7 +179,6 @@ if (!function_exists('bv_admin_fee_h')) {
         return htmlspecialchars((string)($value ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
     }
 }
-
 
 $root = dirname(__DIR__);
 $bvAdminFeeLoadedBootstrapFiles = [];
@@ -227,7 +226,7 @@ if (!function_exists('bv_admin_fee_db_type')) {
 if (!function_exists('bv_admin_fee_db')) {
     function bv_admin_fee_db()
     {
-         foreach (['pdo', 'db', 'database', 'connPdo'] as $name) {
+        foreach (['pdo', 'db', 'database', 'connPdo'] as $name) {
             if (isset($GLOBALS[$name]) && $GLOBALS[$name] instanceof PDO) {
                 return $GLOBALS[$name];
             }
@@ -309,6 +308,17 @@ if (!function_exists('bv_admin_fee_table_columns')) {
     }
 }
 
+if (!function_exists('bv_admin_fee_table_exists')) {
+    function bv_admin_fee_table_exists($db, string $table): bool
+    {
+        return bv_admin_fee_query_all(
+            $db,
+            'SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? LIMIT 1',
+            [$table]
+        ) !== [];
+    }
+}
+
 if (!function_exists('bv_admin_fee_datetime_local')) {
     function bv_admin_fee_datetime_local($value): string
     {
@@ -340,6 +350,74 @@ if (!function_exists('bv_admin_fee_sql_migration')) {
     }
 }
 
+if (!function_exists('bv_admin_fee_setting_write_path_candidates')) {
+    function bv_admin_fee_setting_write_path_candidates(): array
+    {
+        $publicHtml = dirname(__DIR__);
+        return [
+            $publicHtml . '/private_html/seller_fee_override_engine.json',
+            $publicHtml . '/storage/seller_fee_override_engine.json',
+        ];
+    }
+}
+
+if (!function_exists('bv_admin_fee_setting_read_engine_enabled')) {
+    function bv_admin_fee_setting_read_engine_enabled($db): array
+    {
+        if (($db instanceof PDO || $db instanceof mysqli) && bv_admin_fee_table_exists($db, 'site_settings')) {
+            $rows = bv_admin_fee_query_all(
+                $db,
+                'SELECT setting_value FROM site_settings WHERE setting_key = ? LIMIT 1',
+                ['seller_fee_override_engine_enabled']
+            );
+            if ($rows !== []) {
+                return ['enabled' => (string)($rows[0]['setting_value'] ?? '') === '1', 'source' => 'site_settings'];
+            }
+            return ['enabled' => false, 'source' => 'site_settings'];
+        }
+
+        foreach (bv_admin_fee_setting_write_path_candidates() as $path) {
+            if (!is_file($path)) {
+                continue;
+            }
+            $decoded = json_decode((string)file_get_contents($path), true);
+            if (is_array($decoded) && array_key_exists('enabled', $decoded)) {
+                return ['enabled' => (bool)$decoded['enabled'], 'source' => $path];
+            }
+        }
+
+        return ['enabled' => false, 'source' => 'file fallback pending'];
+    }
+}
+
+if (!function_exists('bv_admin_fee_human_fee_label')) {
+    function bv_admin_fee_human_fee_label($value, bool $activeFree = false): string
+    {
+        if ($activeFree) {
+            return 'Free Fee';
+        }
+        if ($value === null || $value === '') {
+            return 'Default';
+        }
+        $formatted = rtrim(rtrim(number_format((float)$value, 3), '0'), '.');
+        return ((float)$value === 0.0) ? 'Free Fee' : 'Custom ' . $formatted . '%';
+    }
+}
+
+if (!function_exists('bv_admin_fee_badge')) {
+    function bv_admin_fee_badge(string $label, string $type = 'default'): string
+    {
+        return '<span class="badge badge-' . bv_admin_fee_h($type) . '">' . bv_admin_fee_h($label) . '</span>';
+    }
+}
+
+if (!function_exists('bv_admin_fee_dashboard_url')) {
+    function bv_admin_fee_dashboard_url(): string
+    {
+        return '/admin/index.php';
+    }
+}
+
 if (empty($_SESSION['seller_fee_control_csrf'])) {
     $_SESSION['seller_fee_control_csrf'] = bin2hex(random_bytes(32));
 }
@@ -366,7 +444,7 @@ foreach ($managedColumns as $column) {
     }
 }
 
-$nameExpr = "CAST(id AS CHAR)";
+$nameExpr = 'CAST(id AS CHAR)';
 if (isset($columns['name'])) {
     $nameExpr = 'name';
 } elseif (isset($columns['full_name'])) {
@@ -381,11 +459,20 @@ if (isset($columns['name'])) {
     $nameExpr = 'first_name';
 }
 
+$farmStoreExpr = "''";
+foreach (['farm_name', 'store_name', 'business_name', 'company_name', 'shop_name'] as $farmStoreColumn) {
+    if (isset($columns[$farmStoreColumn])) {
+        $farmStoreExpr = $farmStoreColumn;
+        break;
+    }
+}
+
 $emailExpr = isset($columns['email']) ? 'email' : "''";
-$statusExpr = isset($columns['account_status']) ? 'account_status' : "''";
+$statusExpr = isset($columns['account_status']) ? 'account_status' : (isset($columns['status']) ? 'status' : "''");
 $selects = [
     'id',
     $nameExpr . ' AS seller_name',
+    $farmStoreExpr . ' AS farm_store_name',
     $emailExpr . ' AS email',
     $statusExpr . ' AS account_status',
 ];
@@ -393,21 +480,27 @@ foreach ($managedColumns as $column) {
     $selects[] = isset($columns[$column]) ? $column : 'NULL AS ' . $column;
 }
 
-$where = [];
-$params = [];
+$baseWhere = [];
+$baseParams = [];
 if (isset($columns['role'])) {
-    $where[] = 'LOWER(role) IN (?, ?, ?)';
-    array_push($params, 'seller', 'breeder', 'vendor');
+    $baseWhere[] = 'LOWER(role) IN (?, ?, ?)';
+    array_push($baseParams, 'seller', 'breeder', 'vendor');
 } elseif (isset($columns['user_type'])) {
-    $where[] = 'LOWER(user_type) IN (?, ?, ?)';
-    array_push($params, 'seller', 'breeder', 'vendor'); 
+    $baseWhere[] = 'LOWER(user_type) IN (?, ?, ?)';
+    array_push($baseParams, 'seller', 'breeder', 'vendor');
 } elseif (isset($columns['is_seller'])) {
-    $where[] = 'is_seller = ?';
-    $params[] = 1;
+    $baseWhere[] = 'is_seller = ?';
+    $baseParams[] = 1;
 }
 
+$allowedFilters = ['all', 'active', 'custom', 'default', 'expired', 'none'];
 $filter = (string)($_GET['filter'] ?? 'all');
+if (!in_array($filter, $allowedFilters, true)) {
+    $filter = 'all';
+}
 $now = date('Y-m-d H:i:s');
+$where = $baseWhere;
+$params = $baseParams;
 if ($filter === 'active' && isset($columns['seller_fee_free_until'])) {
     $where[] = 'seller_fee_free_until IS NOT NULL AND seller_fee_free_until >= ?';
     $params[] = $now;
@@ -416,6 +509,14 @@ if ($filter === 'active' && isset($columns['seller_fee_free_until'])) {
     $params[] = $now;
 } elseif ($filter === 'custom' && isset($columns['seller_fee_percent_override'])) {
     $where[] = 'seller_fee_percent_override IS NOT NULL';
+} elseif ($filter === 'default') {
+    if (isset($columns['seller_fee_percent_override'])) {
+        $where[] = 'seller_fee_percent_override IS NULL';
+    }
+    if (isset($columns['seller_fee_free_until'])) {
+        $where[] = '(seller_fee_free_until IS NULL OR seller_fee_free_until < ?)';
+        $params[] = $now;
+    }
 } elseif ($filter === 'none') {
     if (isset($columns['seller_fee_free_until'])) {
         $where[] = 'seller_fee_free_until IS NULL';
@@ -432,43 +533,66 @@ if ($where !== []) {
 $sql .= ' ORDER BY id DESC LIMIT 500';
 $sellers = $db && isset($columns['id']) ? bv_admin_fee_query_all($db, $sql, $params) : [];
 
-$totalSellers = count($sellers);
+$summarySql = 'SELECT ' . implode(', ', $selects) . ' FROM users';
+if ($baseWhere !== []) {
+    $summarySql .= ' WHERE ' . implode(' AND ', $baseWhere);
+}
+$summarySql .= ' ORDER BY id DESC LIMIT 500';
+$summarySellers = $db && isset($columns['id']) ? bv_admin_fee_query_all($db, $summarySql, $baseParams) : [];
+
+$totalSellers = count($summarySellers);
 $activeFree = 0;
 $customFee = 0;
 $expiredPromos = 0;
-foreach ($sellers as $seller) {
+$defaultFee = 0;
+foreach ($summarySellers as $seller) {
     $until = $seller['seller_fee_free_until'] ?? null;
-    if ($until !== null && $until !== '') {
-        if (strtotime((string)$until) >= time()) {
-            $activeFree++;
-        } else {
-            $expiredPromos++;
-        }
+    $isActive = $until !== null && $until !== '' && strtotime((string)$until) >= time();
+    $isExpired = $until !== null && $until !== '' && !$isActive;
+    $hasOverride = ($seller['seller_fee_percent_override'] ?? null) !== null && $seller['seller_fee_percent_override'] !== '';
+    if ($isActive) {
+        $activeFree++;
     }
-    if (($seller['seller_fee_percent_override'] ?? null) !== null && $seller['seller_fee_percent_override'] !== '') {
+    if ($isExpired) {
+        $expiredPromos++;
+    }
+    if ($hasOverride) {
         $customFee++;
     }
+    if (!$isActive && !$hasOverride) {
+        $defaultFee++;
+    }
 }
+$engineSetting = bv_admin_fee_setting_read_engine_enabled($db);
+$engineEnabled = (bool)$engineSetting['enabled'];
 ?>
 <!doctype html>
 <html lang="en">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Bettavaro Seller Fee Command Center</title>
+    <title>Seller Balance Fee Command Center</title>
     <style>
-        body{font-family:Arial,sans-serif;background:#f6f7fb;color:#172033;margin:0;padding:24px}.wrap{max-width:1440px;margin:0 auto}.cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin:18px 0}.card,.panel{background:#fff;border:1px solid #dfe3ec;border-radius:12px;box-shadow:0 1px 2px rgba(0,0,0,.04)}.card{padding:18px}.card strong{display:block;font-size:28px;margin-top:6px}.panel{padding:16px;overflow:auto}.alert{padding:12px 14px;border-radius:10px;margin:14px 0}.alert-success{background:#e9f8ef;border:1px solid #9ddbb6}.alert-error{background:#ffecec;border:1px solid #f3a0a0}.alert-warning{background:#fff8e5;border:1px solid #e8c968}pre{white-space:pre-wrap;background:#202637;color:#fff;padding:12px;border-radius:8px}table{width:100%;border-collapse:collapse;min-width:1280px}th,td{border-bottom:1px solid #e6e9f0;padding:10px;text-align:left;vertical-align:top}th{font-size:12px;text-transform:uppercase;color:#5d6678;background:#fbfcff}.badge{display:inline-block;padding:4px 8px;border-radius:999px;font-size:12px;font-weight:700}.active{background:#def7e7;color:#136b35}.expired{background:#ffe3e3;color:#8b1e1e}.unset{background:#eef1f6;color:#475064}.custom{background:#e7edff;color:#23439b}.filters a{display:inline-block;margin:0 8px 8px 0;padding:8px 12px;background:#fff;border:1px solid #ccd3df;border-radius:999px;color:#172033;text-decoration:none}.filters a.current{background:#172033;color:#fff}input{box-sizing:border-box;width:170px;max-width:100%;padding:7px;border:1px solid #cbd2df;border-radius:8px}button{padding:8px 12px;border:0;border-radius:8px;background:#172033;color:#fff;cursor:pointer}.muted{color:#687386;font-size:12px}.notes input{width:220px}</style>
+        :root{--bg:#f4f7fb;--card:#fff;--ink:#172033;--muted:#64748b;--line:#dbe3ef;--navy:#10233f;--green:#15803d;--green-bg:#dcfce7;--amber:#b45309;--amber-bg:#fef3c7;--red:#b91c1c;--red-bg:#fee2e2;--blue:#1d4ed8;--blue-bg:#dbeafe;--shadow:0 14px 35px rgba(15,35,63,.08)}
+        *{box-sizing:border-box}body{font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--ink);margin:0;padding:28px 0}.wrap{width:96%;max-width:1600px;margin:0 auto}.hero{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;margin-bottom:20px}.eyebrow{color:var(--muted);font-size:13px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;margin:0 0 8px}.hero h1{font-size:34px;line-height:1.1;margin:0 0 10px}.subtitle{color:var(--muted);font-size:16px;margin:0}.btn,.button-link,button{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:0;border-radius:10px;background:var(--navy);color:#fff;cursor:pointer;font-weight:800;padding:10px 14px;text-decoration:none;white-space:nowrap}.btn-secondary{background:#eef2f7;color:var(--navy);border:1px solid var(--line)}.btn-danger{background:var(--red)}.grid{display:grid;gap:16px}.top-grid{grid-template-columns:minmax(0,1.35fr) minmax(320px,.65fr);margin-bottom:16px}.card,.panel,.notice{background:var(--card);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow)}.card{padding:20px}.notice{padding:20px}.notice h2,.panel h2{margin:0 0 10px;font-size:18px}.notice ul{margin:10px 0 0;padding-left:22px;color:#334155;line-height:1.55}.engine{padding:20px}.engine-head{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:14px}.engine-title{font-size:16px;font-weight:900}.engine-actions{display:flex;gap:10px;flex-wrap:wrap}.cards{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:14px;margin:18px 0}.metric{padding:18px}.metric span{display:block;color:var(--muted);font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.04em}.metric strong{display:block;font-size:30px;margin-top:8px}.panel{padding:18px;margin-top:16px}.alert{padding:13px 15px;border-radius:14px;margin:14px 0;font-weight:700}.alert-success{background:var(--green-bg);border:1px solid #86efac;color:#14532d}.alert-error{background:var(--red-bg);border:1px solid #fca5a5;color:#7f1d1d}.alert-warning{background:var(--amber-bg);border:1px solid #fcd34d;color:#78350f}pre{white-space:pre-wrap;background:#202637;color:#fff;padding:12px;border-radius:10px;overflow:auto}.filters{display:flex;flex-wrap:wrap;gap:10px;margin:8px 0 0}.filters a{display:inline-flex;padding:9px 13px;background:#fff;border:1px solid var(--line);border-radius:999px;color:var(--ink);font-weight:800;text-decoration:none}.filters a.current{background:var(--navy);color:#fff;border-color:var(--navy);box-shadow:0 8px 18px rgba(16,35,63,.18)}.table-scroll{overflow-x:auto;border-radius:14px;border:1px solid var(--line)}table{width:100%;border-collapse:separate;border-spacing:0;min-width:1450px;background:#fff}th,td{border-bottom:1px solid #e8edf5;padding:13px 12px;text-align:left;vertical-align:top}tr:last-child td{border-bottom:0}th{font-size:12px;text-transform:uppercase;color:#536173;background:#f8fafc;letter-spacing:.04em;position:sticky;top:0;z-index:1}.seller-name{font-weight:900}.seller-meta,.muted{color:var(--muted);font-size:12px}.seller-store{margin-top:5px;color:#334155}.badge{display:inline-flex;align-items:center;border-radius:999px;font-size:12px;font-weight:900;padding:5px 9px;margin:2px 4px 2px 0}.badge-active,.badge-free{background:var(--green-bg);color:var(--green)}.badge-expired,.badge-disabled{background:var(--red-bg);color:var(--red)}.badge-unset,.badge-default{background:#eef2f7;color:#475569}.badge-custom,.badge-warning{background:var(--amber-bg);color:var(--amber)}.badge-enabled{background:var(--green-bg);color:var(--green)}.badge-info{background:var(--blue-bg);color:var(--blue)}.edit-card{background:#f8fafc;border:1px solid #e2e8f0;border-radius:14px;padding:12px;min-width:330px}.edit-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.edit-card label{display:block;color:#334155;font-size:12px;font-weight:900}.edit-card input{box-sizing:border-box;width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:9px;background:#fff;margin-top:4px}.edit-card .wide{grid-column:1 / -1}.helper{color:#64748b;font-size:12px;line-height:1.45;margin:10px 0}.notes-cell{max-width:260px;line-height:1.45}.status-pill{display:inline-flex;padding:5px 9px;background:#f1f5f9;border-radius:999px;font-weight:800;color:#475569;font-size:12px}@media (max-width:1100px){.hero,.top-grid{grid-template-columns:1fr;display:grid}.cards{grid-template-columns:repeat(2,minmax(0,1fr))}}@media (max-width:640px){body{padding:18px 0}.hero h1{font-size:26px}.cards{grid-template-columns:1fr}.engine-actions{display:grid}.btn,.button-link,button{width:100%}}
+    </style>
 </head>
 <body>
 <div class="wrap">
-    <h1>Bettavaro Seller Balance Fee Command Center</h1>
-    <p class="muted">Manual seller fee promotions and future-order platform fee controls.</p>
+    <div class="hero">
+        <div>
+            <p class="eyebrow">Admin Controls</p>
+            <h1>Seller Balance Fee Command Center</h1>
+            <p class="subtitle">Manage seller fee promotions, custom platform fee rates, and future-order fee controls.</p>
+        </div>
+        <a class="button-link" href="<?php echo bv_admin_fee_h(bv_admin_fee_dashboard_url()); ?>">← Back to Dashboard</a>
+    </div>
 
     <?php if ($flash && is_array($flash)): ?>
         <div class="alert alert-<?php echo bv_admin_fee_h($flash['type'] ?? 'success'); ?>"><?php echo bv_admin_fee_h($flash['message'] ?? ''); ?></div>
     <?php endif; ?>
-	
-	   <?php if ($debugDbEnabled): ?>
+
+    <?php if ($debugDbEnabled): ?>
         <div class="alert alert-warning">
             <strong>Database debug info</strong>
             <pre><?php echo bv_admin_fee_h(implode("\n", [
@@ -479,7 +603,6 @@ foreach ($sellers as $seller) {
             ])); ?></pre>
         </div>
     <?php endif; ?>
-
 
     <?php if (!$db): ?>
         <div class="alert alert-error">Database connection was not found. Load the platform database bootstrap before opening this page.</div>
@@ -492,65 +615,138 @@ foreach ($sellers as $seller) {
         </div>
     <?php endif; ?>
 
-    <div class="cards">
-        <div class="card">Total Sellers<strong><?php echo bv_admin_fee_h($totalSellers); ?></strong></div>
-        <div class="card">Active Fee-Free Sellers<strong><?php echo bv_admin_fee_h($activeFree); ?></strong></div>
-        <div class="card">Custom Fee Sellers<strong><?php echo bv_admin_fee_h($customFee); ?></strong></div>
-        <div class="card">Expired Promotions<strong><?php echo bv_admin_fee_h($expiredPromos); ?></strong></div>
+    <div class="top-grid grid">
+        <div class="notice">
+            <h2>Safety Notice</h2>
+            <ul>
+                <li>Changes apply only to future paid orders.</li>
+                <li>Old balance entries are not changed.</li>
+                <li>Stripe/payment gateway fees are not affected.</li>
+                <li>Platform fee override controls Bettavaro marketplace fee only.</li>
+            </ul>
+            <div class="alert alert-warning">Engine switch display is ready. Runtime enforcement requires seller_balance.php integration.</div>
+        </div>
+        <div class="engine card">
+            <div class="engine-head">
+                <div>
+                    <div class="engine-title">Seller Fee Override Engine:</div>
+                    <div class="muted">Setting source: <?php echo bv_admin_fee_h($engineSetting['source'] ?? 'unknown'); ?></div>
+                </div>
+                <?php echo bv_admin_fee_badge($engineEnabled ? 'Enabled' : 'Disabled', $engineEnabled ? 'enabled' : 'disabled'); ?>
+            </div>
+            <div class="engine-actions">
+                <form method="post" action="seller_fee_control_update.php">
+                    <input type="hidden" name="csrf_token" value="<?php echo bv_admin_fee_h($csrfToken); ?>">
+                    <input type="hidden" name="action" value="toggle_fee_override_engine">
+                    <input type="hidden" name="enabled" value="1">
+                    <button type="submit">Enable Seller Fee Override</button>
+                </form>
+                <form method="post" action="seller_fee_control_update.php">
+                    <input type="hidden" name="csrf_token" value="<?php echo bv_admin_fee_h($csrfToken); ?>">
+                    <input type="hidden" name="action" value="toggle_fee_override_engine">
+                    <input type="hidden" name="enabled" value="0">
+                    <button class="btn-danger" type="submit">Disable Seller Fee Override</button>
+                </form>
+            </div>
+        </div>
     </div>
 
-    <div class="filters">
-        <?php foreach (['all' => 'All Sellers', 'active' => 'Active Promo', 'expired' => 'Expired Promo', 'custom' => 'Custom Fee', 'none' => 'No Promo'] as $key => $label): ?>
-            <a class="<?php echo $filter === $key ? 'current' : ''; ?>" href="?filter=<?php echo bv_admin_fee_h($key); ?>"><?php echo bv_admin_fee_h($label); ?></a>
-        <?php endforeach; ?>
+    <div class="cards">
+        <div class="card metric"><span>Total Sellers</span><strong><?php echo bv_admin_fee_h($totalSellers); ?></strong></div>
+        <div class="card metric"><span>Fee-Free Active</span><strong><?php echo bv_admin_fee_h($activeFree); ?></strong></div>
+        <div class="card metric"><span>Custom Fee Active</span><strong><?php echo bv_admin_fee_h($customFee); ?></strong></div>
+        <div class="card metric"><span>Default Fee Sellers</span><strong><?php echo bv_admin_fee_h($defaultFee); ?></strong></div>
+        <div class="card metric"><span>Expired Promo</span><strong><?php echo bv_admin_fee_h($expiredPromos); ?></strong></div>
+        <div class="card metric"><span>Engine Status</span><strong><?php echo bv_admin_fee_h($engineEnabled ? 'Enabled' : 'Disabled'); ?></strong></div>
     </div>
 
     <div class="panel">
-        <table>
-            <thead><tr><th>ID</th><th>Seller</th><th>Email</th><th>Status</th><th>Promo Status</th><th>Promo Start</th><th>Promo End</th><th>Fee Override</th><th>Effective Fee</th><th>Notes</th><th>Edit</th></tr></thead>
-            <tbody>
-            <?php foreach ($sellers as $seller): ?>
-                <?php
-                $until = (string)($seller['seller_fee_free_until'] ?? '');
-                $isActive = $until !== '' && strtotime($until) >= time();
-                $isExpired = $until !== '' && !$isActive;
-                $promoStatus = $isActive ? 'Active' : ($isExpired ? 'Expired' : 'Not Set');
-                $promoClass = $isActive ? 'active' : ($isExpired ? 'expired' : 'unset');
-                $override = $seller['seller_fee_percent_override'] ?? null;
-                $hasOverride = $override !== null && $override !== '';
-                $effectiveLabel = $isActive ? 'Free Fee' : ($hasOverride ? 'Custom Fee ' . rtrim(rtrim(number_format((float)$override, 3), '0'), '.') . '%' : 'Default Marketplace Fee');
-                ?>
-                <tr>
-                    <td><?php echo bv_admin_fee_h($seller['id']); ?></td>
-                    <td><?php echo bv_admin_fee_h($seller['seller_name']); ?></td>
-                    <td><?php echo bv_admin_fee_h($seller['email']); ?></td>
-                    <td><?php echo bv_admin_fee_h($seller['account_status']); ?></td>
-                    <td><span class="badge <?php echo bv_admin_fee_h($promoClass); ?>"><?php echo bv_admin_fee_h($promoStatus); ?></span></td>
-                    <td><?php echo bv_admin_fee_h($seller['seller_fee_promo_starts_at']); ?></td>
-                    <td><?php echo bv_admin_fee_h($seller['seller_fee_free_until']); ?></td>
-                    <td><?php echo $hasOverride ? '<span class="badge custom">' . bv_admin_fee_h(rtrim(rtrim(number_format((float)$override, 3), '0'), '.') . '%') . '</span>' : ''; ?></td>
-                    <td><?php echo bv_admin_fee_h($effectiveLabel); ?></td>
-                    <td><?php echo bv_admin_fee_h(trim((string)($seller['seller_fee_promo_note'] ?? '') . ' ' . (string)($seller['seller_fee_override_note'] ?? ''))); ?></td>
-                    <td>
-                        <form method="post" action="seller_fee_control_update.php">
-                            <input type="hidden" name="csrf_token" value="<?php echo bv_admin_fee_h($csrfToken); ?>">
-                            <input type="hidden" name="seller_id" value="<?php echo bv_admin_fee_h($seller['id']); ?>">
-                            <div><label>Start<br><input type="datetime-local" name="seller_fee_promo_starts_at" value="<?php echo bv_admin_fee_h(bv_admin_fee_datetime_local($seller['seller_fee_promo_starts_at'])); ?>"></label></div>
-                            <div><label>End<br><input type="datetime-local" name="seller_fee_free_until" value="<?php echo bv_admin_fee_h(bv_admin_fee_datetime_local($seller['seller_fee_free_until'])); ?>"></label></div>
-                            <div><label>Override %<br><input type="number" step="0.001" min="0" max="100" name="seller_fee_percent_override" value="<?php echo bv_admin_fee_h($seller['seller_fee_percent_override']); ?>"></label></div>
-                            <div class="notes"><label>Promo Note<br><input maxlength="255" name="seller_fee_promo_note" value="<?php echo bv_admin_fee_h($seller['seller_fee_promo_note']); ?>"></label></div>
-                            <div class="notes"><label>Override Note<br><input maxlength="255" name="seller_fee_override_note" value="<?php echo bv_admin_fee_h($seller['seller_fee_override_note']); ?>"></label></div>
-                            <p class="muted">Applies to future paid orders only.</p>
-                            <button type="submit">Update</button>
-                        </form>
-                    </td>
-                </tr>
+        <h2>Seller Filters</h2>
+        <div class="filters">
+            <?php foreach (['all' => 'All Sellers', 'active' => 'Active Free Promo', 'custom' => 'Custom Fee', 'default' => 'Default Fee', 'expired' => 'Expired Promo', 'none' => 'No Promo'] as $key => $label): ?>
+                <a class="<?php echo $filter === $key ? 'current' : ''; ?>" href="?filter=<?php echo bv_admin_fee_h($key); ?>"><?php echo bv_admin_fee_h($label); ?></a>
             <?php endforeach; ?>
-            <?php if ($sellers === []): ?>
-                <tr><td colspan="11">No sellers found.</td></tr>
-            <?php endif; ?>
-            </tbody>
-        </table>
+        </div>
+    </div>
+
+    <div class="panel">
+        <div class="table-scroll">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Seller</th>
+                        <th>Email</th>
+                        <th>Status</th>
+                        <th>Promo Status</th>
+                        <th>Promo Window</th>
+                        <th>Fee Override</th>
+                        <th>Effective Fee</th>
+                        <th>Notes</th>
+                        <th>Edit Controls</th>
+                    </tr>
+                </thead>
+                <tbody>
+                <?php foreach ($sellers as $seller): ?>
+                    <?php
+                    $until = (string)($seller['seller_fee_free_until'] ?? '');
+                    $startsAt = (string)($seller['seller_fee_promo_starts_at'] ?? '');
+                    $startOk = $startsAt === '' || strtotime($startsAt) <= time();
+                    $isActive = $until !== '' && strtotime($until) >= time() && $startOk;
+                    $isExpired = $until !== '' && !$isActive && strtotime($until) < time();
+                    $promoStatus = $isActive ? 'Active' : ($isExpired ? 'Expired' : 'Not Set');
+                    $promoClass = $isActive ? 'active' : ($isExpired ? 'expired' : 'unset');
+                    $override = $seller['seller_fee_percent_override'] ?? null;
+                    $hasOverride = $override !== null && $override !== '';
+                    $overrideLabel = $hasOverride ? bv_admin_fee_human_fee_label($override) : 'Default';
+                    $overrideClass = !$hasOverride ? 'default' : (((float)$override === 0.0) ? 'free' : 'custom');
+                    $effectiveLabel = bv_admin_fee_human_fee_label($hasOverride ? $override : null, $isActive);
+                    $effectiveClass = $isActive || ($hasOverride && (float)$override === 0.0) ? 'free' : ($hasOverride ? 'custom' : 'default');
+                    $farmStore = trim((string)($seller['farm_store_name'] ?? ''));
+                    $promoNote = trim((string)($seller['seller_fee_promo_note'] ?? ''));
+                    $overrideNote = trim((string)($seller['seller_fee_override_note'] ?? ''));
+                    ?>
+                    <tr>
+                        <td>
+                            <div class="seller-name"><?php echo bv_admin_fee_h($seller['seller_name']); ?></div>
+                            <div class="seller-meta">ID #<?php echo bv_admin_fee_h($seller['id']); ?></div>
+                            <?php if ($farmStore !== ''): ?><div class="seller-store"><?php echo bv_admin_fee_h($farmStore); ?></div><?php endif; ?>
+                        </td>
+                        <td><?php echo bv_admin_fee_h($seller['email']); ?></td>
+                        <td><span class="status-pill"><?php echo bv_admin_fee_h($seller['account_status'] ?: 'Unknown'); ?></span></td>
+                        <td><?php echo bv_admin_fee_badge($promoStatus, $promoClass); ?></td>
+                        <td>
+                            <div><strong>Start:</strong> <?php echo bv_admin_fee_h($startsAt !== '' ? $startsAt : 'Not Set'); ?></div>
+                            <div><strong>End:</strong> <?php echo bv_admin_fee_h($until !== '' ? $until : 'Not Set'); ?></div>
+                        </td>
+                        <td><?php echo bv_admin_fee_badge($overrideLabel, $overrideClass); ?></td>
+                        <td><?php echo bv_admin_fee_badge($effectiveLabel, $effectiveClass); ?></td>
+                        <td class="notes-cell">
+                            <div><strong>Promo:</strong> <?php echo bv_admin_fee_h($promoNote !== '' ? $promoNote : '—'); ?></div>
+                            <div><strong>Override:</strong> <?php echo bv_admin_fee_h($overrideNote !== '' ? $overrideNote : '—'); ?></div>
+                        </td>
+                        <td>
+                            <form class="edit-card" method="post" action="seller_fee_control_update.php">
+                                <input type="hidden" name="csrf_token" value="<?php echo bv_admin_fee_h($csrfToken); ?>">
+                                <input type="hidden" name="seller_id" value="<?php echo bv_admin_fee_h($seller['id']); ?>">
+                                <div class="edit-grid">
+                                    <label>Start date/time<input type="datetime-local" name="seller_fee_promo_starts_at" value="<?php echo bv_admin_fee_h(bv_admin_fee_datetime_local($seller['seller_fee_promo_starts_at'])); ?>"></label>
+                                    <label>End date/time<input type="datetime-local" name="seller_fee_free_until" value="<?php echo bv_admin_fee_h(bv_admin_fee_datetime_local($seller['seller_fee_free_until'])); ?>"></label>
+                                    <label>Override %<input type="number" step="0.001" min="0" max="100" name="seller_fee_percent_override" value="<?php echo bv_admin_fee_h($seller['seller_fee_percent_override']); ?>"></label>
+                                    <label>Promo note<input maxlength="255" name="seller_fee_promo_note" value="<?php echo bv_admin_fee_h($seller['seller_fee_promo_note']); ?>"></label>
+                                    <label class="wide">Override note<input maxlength="255" name="seller_fee_override_note" value="<?php echo bv_admin_fee_h($seller['seller_fee_override_note']); ?>"></label>
+                                </div>
+                                <div class="helper">Empty Override % = default fee unless active free promo window<br>0 = free fee<br>5 = custom 5% fee<br>Applies to future paid orders only</div>
+                                <button type="submit">Update</button>
+                            </form>
+                        </td>
+                    </tr>
+                <?php endforeach; ?>
+                <?php if ($sellers === []): ?>
+                    <tr><td colspan="9">No sellers found.</td></tr>
+                <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
     </div>
 </div>
 </body>

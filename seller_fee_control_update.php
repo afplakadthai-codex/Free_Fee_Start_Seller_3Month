@@ -236,6 +236,99 @@ if (!function_exists('bv_admin_fee_update_columns')) {
     }
 }
 
+
+if (!function_exists('bv_admin_fee_update_table_exists')) {
+    function bv_admin_fee_update_table_exists($db, string $table): bool
+    {
+        return bv_admin_fee_update_query_all(
+            $db,
+            'SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? LIMIT 1',
+            [$table]
+        ) !== [];
+    }
+}
+
+if (!function_exists('bv_admin_fee_update_site_setting_upsert')) {
+    function bv_admin_fee_update_site_setting_upsert($db, int $enabled): bool
+    {
+        $existing = bv_admin_fee_update_query_all(
+            $db,
+            'SELECT setting_key FROM site_settings WHERE setting_key = ? LIMIT 1',
+            ['seller_fee_override_engine_enabled']
+        );
+        if ($existing !== []) {
+            return bv_admin_fee_update_execute(
+                $db,
+                'UPDATE site_settings SET setting_value = ?, updated_at = NOW() WHERE setting_key = ? LIMIT 1',
+                [(string)$enabled, 'seller_fee_override_engine_enabled']
+            );
+        }
+
+        return bv_admin_fee_update_execute(
+            $db,
+            'INSERT INTO site_settings (setting_key, setting_value, updated_at) VALUES (?, ?, NOW())',
+            ['seller_fee_override_engine_enabled', (string)$enabled]
+        );
+    }
+}
+
+if (!function_exists('bv_admin_fee_update_write_path_candidates')) {
+    function bv_admin_fee_update_write_path_candidates(): array
+    {
+        $publicHtml = dirname(__DIR__);
+        return [
+            $publicHtml . '/private_html/seller_fee_override_engine.json',
+            $publicHtml . '/storage/seller_fee_override_engine.json',
+        ];
+    }
+}
+
+if (!function_exists('bv_admin_fee_update_admin_id')) {
+    function bv_admin_fee_update_admin_id(): ?int
+    {
+        foreach ([
+            $_SESSION['admin_id'] ?? null,
+            $_SESSION['admin']['id'] ?? null,
+            $_SESSION['user']['id'] ?? null,
+            $_SESSION['auth_user']['id'] ?? null,
+        ] as $value) {
+            if (is_numeric($value) && (int)$value > 0) {
+                return (int)$value;
+            }
+        }
+        return null;
+    }
+}
+
+if (!function_exists('bv_admin_fee_update_write_engine_json')) {
+    function bv_admin_fee_update_write_engine_json(int $enabled): bool
+    {
+        $payload = json_encode([
+            'enabled' => $enabled === 1,
+            'updated_at' => date('Y-m-d H:i:s'),
+            'updated_by' => bv_admin_fee_update_admin_id(),
+        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+        if (!is_string($payload)) {
+            return false;
+        }
+
+        foreach (bv_admin_fee_update_write_path_candidates() as $path) {
+            $dir = dirname($path);
+            if (!is_dir($dir) && !@mkdir($dir, 0755, true) && !is_dir($dir)) {
+                continue;
+            }
+            if (!is_writable($dir)) {
+                continue;
+            }
+            if (@file_put_contents($path, $payload . "\n", LOCK_EX) !== false) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+}
+
 if (!function_exists('bv_admin_fee_update_datetime')) {
     function bv_admin_fee_update_datetime(string $fieldLabel, $value, array &$errors): ?string
     {
@@ -258,6 +351,34 @@ if (!function_exists('bv_admin_fee_update_datetime')) {
 }
 
 $db = bv_admin_fee_update_db();
+$action = (string)($_POST['action'] ?? 'update_seller_fee');
+
+if ($action === 'toggle_fee_override_engine') {
+    $enabledRaw = (string)($_POST['enabled'] ?? '');
+    if (!in_array($enabledRaw, ['0', '1'], true)) {
+        bv_admin_fee_update_flash('error', 'Invalid seller fee override engine setting.');
+        bv_admin_fee_update_redirect();
+    }
+
+    $enabled = (int)$enabledRaw;
+    $saved = false;
+    $source = '';
+    if (($db instanceof PDO || $db instanceof mysqli) && bv_admin_fee_update_table_exists($db, 'site_settings')) {
+        $saved = bv_admin_fee_update_site_setting_upsert($db, $enabled);
+        $source = 'site settings';
+    } else {
+        $saved = bv_admin_fee_update_write_engine_json($enabled);
+        $source = 'JSON fallback';
+    }
+
+    if ($saved) {
+        bv_admin_fee_update_flash('success', 'Seller Fee Override Engine ' . ($enabled === 1 ? 'enabled' : 'disabled') . ' in ' . $source . '. Runtime enforcement requires seller_balance.php integration.');
+    } else {
+        bv_admin_fee_update_flash('error', 'Seller Fee Override Engine setting could not be saved.');
+    }
+    bv_admin_fee_update_redirect();
+}
+
 if (!$db) {
     bv_admin_fee_update_flash('error', 'Database connection was not found.');
     bv_admin_fee_update_redirect();
