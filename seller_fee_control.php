@@ -180,38 +180,62 @@ if (!function_exists('bv_admin_fee_h')) {
     }
 }
 
+
+$root = dirname(__DIR__);
+$bvAdminFeeLoadedBootstrapFiles = [];
+$bvAdminFeeBootstrapCandidates = [
+    $root . '/config/db.php',
+    $root . '/includes/db.php',
+    $root . '/includes/config.php',
+    $root . '/includes/bootstrap.php',
+    $root . '/includes/init.php',
+];
+foreach ($bvAdminFeeBootstrapCandidates as $bootstrapFile) {
+    if (is_file($bootstrapFile)) {
+        require_once $bootstrapFile;
+        $bvAdminFeeLoadedBootstrapFiles[] = $bootstrapFile;
+    }
+}
+unset($bvAdminFeeBootstrapCandidates, $bootstrapFile);
+
+if (!function_exists('bv_admin_fee_db_variable_names')) {
+    function bv_admin_fee_db_variable_names(): array
+    {
+        $names = [];
+        foreach (['pdo', 'db', 'database', 'connPdo', 'conn', 'mysqli', 'dbConn'] as $name) {
+            if (isset($GLOBALS[$name]) && ($GLOBALS[$name] instanceof PDO || $GLOBALS[$name] instanceof mysqli)) {
+                $names[] = '$' . $name;
+            }
+        }
+        return $names;
+    }
+}
+
+if (!function_exists('bv_admin_fee_db_type')) {
+    function bv_admin_fee_db_type($db): string
+    {
+        if ($db instanceof PDO) {
+            return 'PDO';
+        }
+        if ($db instanceof mysqli) {
+            return 'MySQLi';
+        }
+        return 'none';
+    }
+}
+
 if (!function_exists('bv_admin_fee_db')) {
     function bv_admin_fee_db()
     {
-        foreach (['pdo', 'db', 'conn', 'mysqli'] as $name) {
-            if (isset($GLOBALS[$name]) && ($GLOBALS[$name] instanceof PDO || $GLOBALS[$name] instanceof mysqli)) {
+         foreach (['pdo', 'db', 'database', 'connPdo'] as $name) {
+            if (isset($GLOBALS[$name]) && $GLOBALS[$name] instanceof PDO) {
                 return $GLOBALS[$name];
             }
         }
 
-        $root = dirname(__DIR__, 2);
-        $candidates = [
-            $root . '/includes/db.php',
-            $root . '/config/database.php',
-            $root . '/config.php',
-            $root . '/includes/config.php',
-            $root . '/bootstrap.php',
-            $root . '/seller_fee_promotion.php',
-        ];
-        foreach ($candidates as $file) {
-            if (is_file($file)) {
-                require_once $file;
-                foreach (['pdo', 'db', 'conn', 'mysqli'] as $name) {
-                    if (isset($GLOBALS[$name]) && ($GLOBALS[$name] instanceof PDO || $GLOBALS[$name] instanceof mysqli)) {
-                        return $GLOBALS[$name];
-                    }
-                }
-                if (function_exists('bv_seller_fee_promo_db')) {
-                    $promoDb = bv_seller_fee_promo_db();
-                    if ($promoDb instanceof PDO || $promoDb instanceof mysqli) {
-                        return $promoDb;
-                    }
-                }
+        foreach (['conn', 'mysqli', 'dbConn'] as $name) {
+            if (isset($GLOBALS[$name]) && $GLOBALS[$name] instanceof mysqli) {
+                return $GLOBALS[$name];
             }
         }
 
@@ -324,6 +348,9 @@ $flash = $_SESSION['seller_fee_control_flash'] ?? null;
 unset($_SESSION['seller_fee_control_flash']);
 
 $db = bv_admin_fee_db();
+$debugDbEnabled = (string)($_GET['debug_db'] ?? '') === '1';
+$debugDbType = bv_admin_fee_db_type($db);
+$debugDbVariableNames = bv_admin_fee_db_variable_names();
 $columns = $db ? bv_admin_fee_table_columns($db, 'users') : [];
 $managedColumns = [
     'seller_fee_free_until',
@@ -370,10 +397,10 @@ $where = [];
 $params = [];
 if (isset($columns['role'])) {
     $where[] = 'LOWER(role) IN (?, ?, ?)';
-    array_push($params, 'seller', 'vendor', 'merchant');
+    array_push($params, 'seller', 'breeder', 'vendor');
 } elseif (isset($columns['user_type'])) {
     $where[] = 'LOWER(user_type) IN (?, ?, ?)';
-    array_push($params, 'seller', 'vendor', 'merchant');
+    array_push($params, 'seller', 'breeder', 'vendor'); 
 } elseif (isset($columns['is_seller'])) {
     $where[] = 'is_seller = ?';
     $params[] = 1;
@@ -440,6 +467,19 @@ foreach ($sellers as $seller) {
     <?php if ($flash && is_array($flash)): ?>
         <div class="alert alert-<?php echo bv_admin_fee_h($flash['type'] ?? 'success'); ?>"><?php echo bv_admin_fee_h($flash['message'] ?? ''); ?></div>
     <?php endif; ?>
+	
+	   <?php if ($debugDbEnabled): ?>
+        <div class="alert alert-warning">
+            <strong>Database debug info</strong>
+            <pre><?php echo bv_admin_fee_h(implode("\n", [
+                'Detected root path: ' . $root,
+                'Loaded bootstrap files: ' . ($bvAdminFeeLoadedBootstrapFiles === [] ? 'none' : implode(', ', $bvAdminFeeLoadedBootstrapFiles)),
+                'Detected DB type: ' . $debugDbType,
+                'Available DB variable names: ' . ($debugDbVariableNames === [] ? 'none' : implode(', ', $debugDbVariableNames)),
+            ])); ?></pre>
+        </div>
+    <?php endif; ?>
+
 
     <?php if (!$db): ?>
         <div class="alert alert-error">Database connection was not found. Load the platform database bootstrap before opening this page.</div>
