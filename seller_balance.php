@@ -577,9 +577,24 @@ if (!function_exists('bv_seller_balance_process_order_paid')) {
             $feeKey = 'order_paid_platform_fee:' . $orderId . ':' . $itemId;
             $legacyKey = 'order_paid:' . $orderId . ':' . $itemId;
 
-           $platformFeeWaived = function_exists('bv_seller_fee_promo_is_active')
-                && bv_seller_fee_promo_is_active($sellerId);
-            $platformFee = $platformFeeWaived ? 0.00 : round($gross * $commissionRate, 4); 
+             $defaultPlatformFeePercent = round($commissionRate * 100, 4);
+            $platformFeePercent = $defaultPlatformFeePercent;
+            $feeMode = 'default';
+            if (function_exists('bv_seller_fee_promo_apply_fee_amount')) {
+                try {
+                    $feeDecision = bv_seller_fee_promo_apply_fee_amount($gross, $defaultPlatformFeePercent, $sellerId);
+                    $platformFee = round((float)($feeDecision['fee_amount'] ?? round($gross * $commissionRate, 4)), 4);
+                    $platformFeePercent = (float)($feeDecision['percent_used'] ?? $defaultPlatformFeePercent);
+                    $feeMode = (string)($feeDecision['mode'] ?? 'default');
+                } catch (Throwable) {
+                    $platformFee = round($gross * $commissionRate, 4);
+                    $platformFeePercent = $defaultPlatformFeePercent;
+                    $feeMode = 'default';
+                }
+            } else {
+                $platformFee = round($gross * $commissionRate, 4);
+            }
+            $platformFeeWaived = $platformFee <= 0;
             $netEarning = round($gross - $platformFee, 4);
 
             try {
@@ -595,7 +610,7 @@ if (!function_exists('bv_seller_balance_process_order_paid')) {
                     continue;
                 }
 
-                if ($earningExists && $feeExists) {
+                 if ($earningExists && ($feeExists || $platformFee <= 0)) { 
                     $pdo->rollBack();
                     $processed[] = $itemId;
                     continue;
@@ -638,6 +653,8 @@ if (!function_exists('bv_seller_balance_process_order_paid')) {
                             'order_item_id'   => $itemId,
                             'gross'           => $gross,
                             'commission_rate' => $commissionRate,
+                           'platform_fee_percent' => $platformFeePercent,
+                            'platform_fee_mode' => $feeMode,							
                             'platform_fee'    => $platformFee,
 	                        'platform_fee_waived' => $platformFeeWaived,						
                             'net_earning'     => $netEarning,
@@ -648,7 +665,18 @@ if (!function_exists('bv_seller_balance_process_order_paid')) {
                     $pendingDelta = round($pendingDelta + $gross, 4);
                     $grossDelta = $gross;
                 }
-               if (!$feeExists && !$platformFeeWaived && $platformFee > 0) {
+                 if (!$feeExists && $platformFee <= 0 && function_exists('bv_seller_balance_log')) {
+                    bv_seller_balance_log('platform_fee_waived', [
+                        'order_id' => $orderId,
+                        'order_item_id' => $itemId,
+                        'seller_id' => $sellerId,
+                        'gross' => $gross,
+                        'platform_fee_percent' => $platformFeePercent,
+                        'platform_fee_mode' => $feeMode,
+                    ]);
+                }
+
+               if (!$feeExists && $platformFee > 0) {
                     $pendingAfterFee = round($pendingCursor - $platformFee, 4);
                     _bv_sb_insert_ledger_once($pdo, [
                         'seller_id'       => $sellerId,
@@ -662,12 +690,14 @@ if (!function_exists('bv_seller_balance_process_order_paid')) {
                         'reference_type'  => 'order_item',
                         'reference_id'    => $itemId,
                         'idempotency_key' => $feeKey,
-                        'note'            => 'Platform fee ' . round($commissionRate * 100, 2) . '% on order #' . $orderId,
+                        'note'            => 'Platform fee ' . round($platformFeePercent, 2) . '% on order #' . $orderId,
                         'meta_json'       => [
                             'order_id'        => $orderId,
                             'order_item_id'   => $itemId,
                             'gross'           => $gross,
                             'commission_rate' => $commissionRate,
+                            'platform_fee_percent' => $platformFeePercent,
+                            'platform_fee_mode' => $feeMode,							
                             'platform_fee'    => $platformFee,
                         ],
                         'created_by_type' => 'system',
