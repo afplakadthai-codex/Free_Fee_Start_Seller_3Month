@@ -42,6 +42,12 @@ if (!function_exists('bv_refund_fee_engine_boot')) {
     }
 }
 
+$sellerFeePromoFile = __DIR__ . '/seller_fee_promotion.php';
+if (is_file($sellerFeePromoFile)) {
+    require_once $sellerFeePromoFile;
+}
+
+
 if (!function_exists('bv_refund_fee_engine_db')) {
     function bv_refund_fee_engine_db()
     {
@@ -780,6 +786,70 @@ if (!function_exists('bv_refund_fee_build_order_paid_snapshot')) {
                 - ($snapshot['manual_deduction_amount'] ?? 0)
             )
         );
+		
+        if (function_exists('bv_seller_fee_promo_apply_to_snapshot')) {
+            try {
+                $sellerId = (int) ($order['seller_id'] ?? 0);
+                $detectedSellerIds = [];
+
+                if ($sellerId > 0) {
+                    $detectedSellerIds[$sellerId] = true;
+                } elseif ($orderId > 0 && bv_refund_fee_table_exists('order_items')) {
+                    $orderItemCols = bv_refund_fee_columns('order_items');
+                    $listingCols = bv_refund_fee_table_exists('listings') ? bv_refund_fee_columns('listings') : [];
+
+                    if (isset($orderItemCols['seller_id'])) {
+                        $rows = bv_refund_fee_query_all(
+                            'SELECT DISTINCT seller_id FROM order_items WHERE order_id = ? AND seller_id IS NOT NULL AND seller_id > 0',
+                            [$orderId]
+                        );
+
+                        foreach ($rows as $row) {
+                            $rowSellerId = (int) ($row['seller_id'] ?? 0);
+                            if ($rowSellerId > 0) {
+                                $detectedSellerIds[$rowSellerId] = true;
+                            }
+                        }
+                    }
+
+                    if (isset($orderItemCols['listing_id']) && isset($listingCols['id'], $listingCols['seller_id'])) {
+                        $rows = bv_refund_fee_query_all(
+                            'SELECT DISTINCT l.seller_id FROM order_items oi INNER JOIN listings l ON l.id = oi.listing_id WHERE oi.order_id = ? AND l.seller_id IS NOT NULL AND l.seller_id > 0',
+                            [$orderId]
+                        );
+
+                        foreach ($rows as $row) {
+                            $rowSellerId = (int) ($row['seller_id'] ?? 0);
+                            if ($rowSellerId > 0) {
+                                $detectedSellerIds[$rowSellerId] = true;
+                            }
+                        }
+                    }
+                }
+
+                if (count($detectedSellerIds) === 1) {
+                    $sellerId = (int) key($detectedSellerIds);
+                    if ($sellerId > 0) {
+                        $snapshot = bv_seller_fee_promo_apply_to_snapshot($snapshot, $sellerId);
+                        bv_refund_fee_log('seller_fee_promo_applied', [
+                            'order_id' => $orderId,
+                            'seller_id' => $sellerId,
+                        ]);
+                    }
+                } elseif (count($detectedSellerIds) > 1) {
+                    bv_refund_fee_log('seller_fee_promo_skipped_multi_seller', [
+                        'order_id' => $orderId,
+                        'seller_ids' => array_map('intval', array_keys($detectedSellerIds)),
+                    ]);
+                }
+            } catch (Throwable $e) {
+                bv_refund_fee_log('seller_fee_promo_failed', [
+                    'order_id' => $orderId,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+		
 
         bv_refund_fee_log('build_order_paid_snapshot_completed', [
             'order_id' => $orderId,
