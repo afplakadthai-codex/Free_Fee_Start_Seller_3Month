@@ -25,6 +25,12 @@ declare(strict_types=1);
 // BOOTSTRAP — PDO connection
 // ---------------------------------------------------------------------------
 
+$sellerFeePromotionFile = __DIR__ . '/seller_fee_promotion.php';
+if (is_file($sellerFeePromotionFile)) {
+    require_once $sellerFeePromotionFile;
+}
+unset($sellerFeePromotionFile);
+
 if (!function_exists('_bv_sb_request_context_meta')) {
     function _bv_sb_request_context_meta(): array
     {
@@ -571,7 +577,9 @@ if (!function_exists('bv_seller_balance_process_order_paid')) {
             $feeKey = 'order_paid_platform_fee:' . $orderId . ':' . $itemId;
             $legacyKey = 'order_paid:' . $orderId . ':' . $itemId;
 
-            $platformFee = round($gross * $commissionRate, 4);
+           $platformFeeWaived = function_exists('bv_seller_fee_promo_is_active')
+                && bv_seller_fee_promo_is_active($sellerId);
+            $platformFee = $platformFeeWaived ? 0.00 : round($gross * $commissionRate, 4); 
             $netEarning = round($gross - $platformFee, 4);
 
             try {
@@ -631,6 +639,7 @@ if (!function_exists('bv_seller_balance_process_order_paid')) {
                             'gross'           => $gross,
                             'commission_rate' => $commissionRate,
                             'platform_fee'    => $platformFee,
+	                        'platform_fee_waived' => $platformFeeWaived,						
                             'net_earning'     => $netEarning,
                         ],
                         'created_by_type' => 'system',
@@ -639,7 +648,7 @@ if (!function_exists('bv_seller_balance_process_order_paid')) {
                     $pendingDelta = round($pendingDelta + $gross, 4);
                     $grossDelta = $gross;
                 }
-               if (!$feeExists) {
+               if (!$feeExists && !$platformFeeWaived && $platformFee > 0) {
                     $pendingAfterFee = round($pendingCursor - $platformFee, 4);
                     _bv_sb_insert_ledger_once($pdo, [
                         'seller_id'       => $sellerId,
