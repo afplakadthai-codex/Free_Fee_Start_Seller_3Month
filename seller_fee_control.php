@@ -22,17 +22,55 @@ foreach ($adminGuardCandidates as $guardFile) {
 }
 unset($adminGuardCandidates, $guardFile);
 
+if (!function_exists('bv_admin_fee_normalize_role')) {
+    function bv_admin_fee_normalize_role($role): string
+    {
+        return is_string($role) ? str_replace('-', '_', strtolower(trim($role))) : '';
+    }
+}
+
+if (!function_exists('bv_admin_fee_admin_roles')) {
+    function bv_admin_fee_admin_roles(): array
+    {
+        return ['admin', 'super_admin', 'superadmin', 'administrator', 'owner'];
+    }
+}
+
+if (!function_exists('bv_admin_fee_role_is_admin')) {
+    function bv_admin_fee_role_is_admin($role): bool
+    {
+        return in_array(bv_admin_fee_normalize_role($role), bv_admin_fee_admin_roles(), true);
+    }
+}
+
+if (!function_exists('bv_admin_fee_is_truthy_flag')) {
+    function bv_admin_fee_is_truthy_flag($flag): bool
+    {
+        return $flag === true || $flag === 1 || $flag === '1' || $flag === 'yes' || $flag === 'true';
+    }
+}
+
 if (!function_exists('bv_admin_fee_is_admin')) {
     function bv_admin_fee_is_admin(): bool
     {
+        foreach (['is_admin', 'admin_is_logged_in', 'bv_is_admin', 'btv_is_admin', 'current_user_is_admin'] as $adminCheck) {
+            if (function_exists($adminCheck)) {
+                $reflection = new ReflectionFunction($adminCheck);
+                if ($reflection->getNumberOfRequiredParameters() === 0 && $adminCheck() === true) {
+                    return true;
+                }
+            }
+        }
+		
         $flags = [
             $_SESSION['is_admin'] ?? null,
             $_SESSION['admin_logged_in'] ?? null,
             $_SESSION['admin']['is_admin'] ?? null,
             $_SESSION['user']['is_admin'] ?? null,
+            $_SESSION['auth_user']['is_admin'] ?? null,			
         ];
         foreach ($flags as $flag) {
-            if ($flag === true || $flag === 1 || $flag === '1' || $flag === 'yes') {
+            if (bv_admin_fee_is_truthy_flag($flag)) {
                 return true;
             }
         }
@@ -40,21 +78,97 @@ if (!function_exists('bv_admin_fee_is_admin')) {
         $roles = [
             $_SESSION['role'] ?? null,
             $_SESSION['user_role'] ?? null,
+           $_SESSION['admin_role'] ?? null,
+            $_SESSION['account_role'] ?? null,			
             $_SESSION['admin']['role'] ?? null,
             $_SESSION['user']['role'] ?? null,
+            $_SESSION['auth_user']['role'] ?? null,
+            $_SESSION['member']['role'] ?? null,			
         ];
         foreach ($roles as $role) {
-            if (is_string($role) && in_array(strtolower($role), ['admin', 'super_admin', 'administrator'], true)) {
+            if (bv_admin_fee_role_is_admin($role)) {
                 return true;
             }
         }
 
-        return isset($_SESSION['admin_id']) || isset($_SESSION['admin']['id']);
+        if (isset($_SESSION['admin_id']) || isset($_SESSION['admin']['id'])) {
+            return true;
+        }
+
+        if (isset($_SESSION['user']['id']) && bv_admin_fee_role_is_admin($_SESSION['user']['role'] ?? null)) {
+            return true;
+        }
+
+        return isset($_SESSION['auth_user']['id']) && bv_admin_fee_role_is_admin($_SESSION['auth_user']['role'] ?? null);
+    }
+}
+
+if (!function_exists('bv_admin_fee_is_sensitive_key')) {
+    function bv_admin_fee_is_sensitive_key($key): bool
+    {
+        return preg_match('/password|token|csrf|secret|cookie|session/i', (string)$key) === 1;
+    }
+}
+
+if (!function_exists('bv_admin_fee_debug_session_keys')) {
+    function bv_admin_fee_debug_session_keys(array $session, string $prefix = ''): array
+    {
+        $keys = [];
+        foreach ($session as $key => $value) {
+            $path = $prefix === '' ? (string)$key : $prefix . '.' . (string)$key;
+            if (bv_admin_fee_is_sensitive_key($path)) {
+                continue;
+            }
+            $keys[] = $path;
+            if (is_array($value)) {
+                $keys = array_merge($keys, bv_admin_fee_debug_session_keys($value, $path));
+            }
+        }
+        return $keys;
+    }
+}
+
+if (!function_exists('bv_admin_fee_debug_role_candidates')) {
+    function bv_admin_fee_debug_role_candidates(): array
+    {
+        $roles = [
+            'role' => $_SESSION['role'] ?? null,
+            'user_role' => $_SESSION['user_role'] ?? null,
+            'admin_role' => $_SESSION['admin_role'] ?? null,
+            'account_role' => $_SESSION['account_role'] ?? null,
+            'admin.role' => $_SESSION['admin']['role'] ?? null,
+            'user.role' => $_SESSION['user']['role'] ?? null,
+            'auth_user.role' => $_SESSION['auth_user']['role'] ?? null,
+            'member.role' => $_SESSION['member']['role'] ?? null,
+        ];
+        $debug = [];
+        foreach ($roles as $key => $value) {
+            if (is_scalar($value) || $value === null) {
+                $debug[$key] = [
+                    'raw' => $value === null ? null : (string)$value,
+                    'normalized' => bv_admin_fee_normalize_role($value),
+                ];
+            }
+        }
+        return $debug;
     }
 }
 
 if (!bv_admin_fee_is_admin()) {
     http_response_code(403);
+   if (($_GET['debug_auth'] ?? '') === '1') {
+        header('Content-Type: text/plain; charset=UTF-8');
+        echo "Forbidden\n\n";
+        echo "Session keys:\n";
+        foreach (bv_admin_fee_debug_session_keys($_SESSION) as $key) {
+            echo '- ' . $key . "\n";
+        }
+        echo "\nRole candidates:\n";
+        foreach (bv_admin_fee_debug_role_candidates() as $key => $role) {
+            echo '- ' . $key . ': raw=' . var_export($role['raw'], true) . ', normalized=' . var_export($role['normalized'], true) . "\n";
+        }
+        exit;
+    }	
     echo 'Forbidden';
     exit;
 }
